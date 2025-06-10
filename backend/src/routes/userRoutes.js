@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userObserverController = require('../controllers/userObserverController');
-const { authenticateToken } = require('../middleware/authMiddleware');
+const { authenticateToken, authorizeAdmin } = require('../middleware/authMiddleware');
 
 // Apply authentication middleware to all routes
 router.use(authenticateToken);
@@ -30,9 +30,6 @@ const {
     upload, // The multer instance from the controller
     uploadObservers
 } = require('../controllers/userObserverController');
-
-// CORRECT
-const { authenticateToken, authorizeAdmin } = require('../middleware/authMiddleware.js');
 
 // Add the new route for bulk uploading observers
 router.post(
