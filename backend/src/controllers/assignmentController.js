@@ -1,6 +1,9 @@
 const AssignmentService = require('../services/assignmentService');
+const GeneticAssignmentService = require('../services/geneticAssignmentService');
 const { client } = require('../../database/db');
 const jwt = require('jsonwebtoken');
+const fs = require('fs').promises;
+const path = require('path');
 
 const assignmentController = {
     // Get all exams with their assignment status
@@ -65,51 +68,24 @@ const assignmentController = {
 
     // Assign observers to a specific exam
     assignObservers: async (req, res) => {
-        const token = req.header('Authorization')?.replace('Bearer ', '');
-        if (!token) {
-            return res.status(401).json({ message: 'Authentication required' });
-        }
-
         try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            console.log(`[ASSIGNMENT CONTROLLER] Authentication Details:`, {
-                roleId: decoded.roleId,
-                userId: decoded.userId
-            });
-
-            if (decoded.roleId !== 2) { // Admin role ID
-                console.warn(`[ASSIGNMENT CONTROLLER] Unauthorized access attempt`, {
-                    roleId: decoded.roleId,
-                    userId: decoded.userId
-                });
-                return res.status(403).json({ message: 'Only administrators can assign observers' });
-            }
+            // User is already authenticated by middleware
+            // No need to check for admin role - matching randomDistribution behavior
 
             const { examId } = req.params;
-            console.log(`[ASSIGNMENT CONTROLLER] Attempting to assign observers for Exam ID: ${examId}`);
 
-            try {
-                const result = await AssignmentService.assignObserversToExam(examId);
-                console.log(`[ASSIGNMENT CONTROLLER] Assignment Result:`, JSON.stringify(result));
-                res.json(result);
-            } catch (assignmentError) {
-                console.error(`[ASSIGNMENT CONTROLLER] Assignment Error Details:`, {
-                    message: assignmentError.message,
-                    stack: assignmentError.stack,
-                    name: assignmentError.name
-                });
-                res.status(500).json({ 
-                    message: 'Failed to assign observers', 
-                    errorDetails: assignmentError.message 
-                });
-            }
-        } catch (authError) {
-            console.error(`[ASSIGNMENT CONTROLLER] Authentication Error:`, {
-                message: authError.message,
-                stack: authError.stack,
-                name: authError.name
+            const result = await AssignmentService.assignObserversToExam(examId);
+            res.json(result);
+        } catch (error) {
+            console.error(`[ASSIGNMENT CONTROLLER] Error:`, {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
             });
-            res.status(401).json({ message: 'Authentication failed' });
+            res.status(500).json({ 
+                message: 'Failed to assign observers', 
+                errorDetails: error.message 
+            });
         }
     },
 
@@ -203,7 +179,248 @@ const assignmentController = {
             console.error('Error fetching assignment statistics:', error);
             res.status(500).json({ message: 'Failed to fetch assignment statistics' });
         }
+    },
+
+    // Get performance history from files
+    getPerformanceHistory: async (req, res) => {
+        try {
+            const { limit = 10, offset = 0 } = req.query;
+            const reportsDir = path.join(__dirname, '../../performance-reports');
+            
+            // Read all performance report files
+            let files = [];
+            try {
+                files = await fs.readdir(reportsDir);
+                files = files.filter(f => f.startsWith('assignment-performance-') && f.endsWith('.json'));
+            } catch (err) {
+                // Directory might not exist yet
+                return res.json({ performances: [], total: 0 });
+            }
+            
+            // Sort files by timestamp (newest first)
+            files.sort().reverse();
+            
+            // Apply pagination
+            const paginatedFiles = files.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+            
+            // Read the performance reports
+            const performances = [];
+            for (const file of paginatedFiles) {
+                try {
+                    const content = await fs.readFile(path.join(reportsDir, file), 'utf8');
+                    const report = JSON.parse(content);
+                    performances.push({
+                        filename: file,
+                        ...report
+                    });
+                } catch (err) {
+                    console.error(`Error reading performance file ${file}:`, err);
+                }
+            }
+            
+            res.json({
+                performances,
+                total: files.length
+            });
+        } catch (error) {
+            console.error('Error fetching performance history:', error);
+            res.status(500).json({ message: 'Failed to fetch performance history' });
+        }
+    },
+
+    // Get performance statistics summary from summary file
+    getPerformanceStats: async (req, res) => {
+        try {
+            const { days = 7 } = req.query;
+            const reportsDir = path.join(__dirname, '../../performance-reports');
+            const summaryFile = path.join(reportsDir, 'performance-summary.jsonl');
+            
+            let summaryLines = [];
+            try {
+                const content = await fs.readFile(summaryFile, 'utf8');
+                summaryLines = content.trim().split('\n').filter(line => line);
+            } catch (err) {
+                // File might not exist yet
+                return res.json({
+                    dailyStats: [],
+                    overallStats: {
+                        totalOperations: 0,
+                        avgTimeMs: 0,
+                        avgExamsPerSecond: 0,
+                        bestTimeMs: null,
+                        worstTimeMs: null
+                    },
+                    period: `${days} days`
+                });
+            }
+            
+            // Parse all summary lines
+            const allSummaries = summaryLines.map(line => {
+                try {
+                    return JSON.parse(line);
+                } catch (err) {
+                    return null;
+                }
+            }).filter(s => s !== null);
+            
+            // Filter by date range
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
+            
+            const recentSummaries = allSummaries.filter(s => 
+                new Date(s.timestamp) >= cutoffDate
+            );
+            
+            // Calculate daily statistics
+            const dailyStats = {};
+            recentSummaries.forEach(summary => {
+                const date = new Date(summary.timestamp).toISOString().split('T')[0];
+                if (!dailyStats[date]) {
+                    dailyStats[date] = {
+                        date,
+                        operations: [],
+                        totalExams: 0
+                    };
+                }
+                dailyStats[date].operations.push(summary);
+                dailyStats[date].totalExams += summary.examCount;
+            });
+            
+            // Calculate aggregated daily stats
+            const dailyStatsArray = Object.values(dailyStats).map(day => {
+                const times = day.operations.map(op => parseFloat(op.totalTimeMs));
+                const examsPerSec = day.operations.map(op => parseFloat(op.examsPerSecond));
+                
+                return {
+                    date: day.date,
+                    totalOperations: day.operations.length,
+                    totalExamsProcessed: day.totalExams,
+                    avgDurationMs: (times.reduce((a, b) => a + b, 0) / times.length).toFixed(2),
+                    avgExamsPerSecond: (examsPerSec.reduce((a, b) => a + b, 0) / examsPerSec.length).toFixed(2),
+                    maxExamsPerSecond: Math.max(...examsPerSec).toFixed(2),
+                    bestTimeMs: Math.min(...times),
+                    worstTimeMs: Math.max(...times)
+                };
+            }).sort((a, b) => b.date.localeCompare(a.date));
+            
+            // Calculate overall statistics
+            const allTimes = recentSummaries.map(s => parseFloat(s.totalTimeMs));
+            const allExamsPerSec = recentSummaries.map(s => parseFloat(s.examsPerSecond));
+            
+            const overallStats = {
+                totalOperations: recentSummaries.length,
+                totalExamsProcessed: recentSummaries.reduce((sum, s) => sum + s.examCount, 0),
+                avgDurationMs: allTimes.length > 0 ? 
+                    (allTimes.reduce((a, b) => a + b, 0) / allTimes.length).toFixed(2) : 0,
+                avgExamsPerSecond: allExamsPerSec.length > 0 ?
+                    (allExamsPerSec.reduce((a, b) => a + b, 0) / allExamsPerSec.length).toFixed(2) : 0,
+                maxExamsPerSecond: allExamsPerSec.length > 0 ? 
+                    Math.max(...allExamsPerSec).toFixed(2) : 0,
+                bestTimeMs: allTimes.length > 0 ? Math.min(...allTimes) : null,
+                worstTimeMs: allTimes.length > 0 ? Math.max(...allTimes) : null
+            };
+            
+            res.json({
+                dailyStats: dailyStatsArray,
+                overallStats,
+                period: `${days} days`
+            });
+        } catch (error) {
+            console.error('Error fetching performance statistics:', error);
+            res.status(500).json({ message: 'Failed to fetch performance statistics' });
+        }
+    },
+
+    // Assign observers using genetic algorithm
+    assignObserversWithGA: async (req, res) => {
+        try {
+            // User is already authenticated by middleware
+            // No need to check for admin role - matching randomDistribution behavior
+
+            const { scheduleId } = req.params;
+            const { 
+                populationSize = 50,
+                generations = 100,
+                mutationRate = 0.1,
+                crossoverRate = 0.7,
+                elitismRate = 0.1
+            } = req.body;
+
+            // Validate parameters
+            if (populationSize < 10 || populationSize > 200) {
+                return res.status(400).json({ message: 'Population size must be between 10 and 200' });
+            }
+            if (generations < 10 || generations > 500) {
+                return res.status(400).json({ message: 'Generations must be between 10 and 500' });
+            }
+            if (mutationRate < 0 || mutationRate > 1) {
+                return res.status(400).json({ message: 'Mutation rate must be between 0 and 1' });
+            }
+            if (crossoverRate < 0 || crossoverRate > 1) {
+                return res.status(400).json({ message: 'Crossover rate must be between 0 and 1' });
+            }
+
+            // Get all exam IDs for this schedule
+            const examsResult = await client.query(
+                `SELECT ExamID FROM ExamSchedule WHERE ScheduleID = $1`,
+                [scheduleId]
+            );
+
+            if (examsResult.rows.length === 0) {
+                return res.status(404).json({ message: 'No exams found for this schedule' });
+            }
+
+            const examIds = examsResult.rows.map(row => row.examid);
+
+            // Create GA service with custom parameters
+            const gaService = new GeneticAssignmentService({
+                populationSize,
+                generations,
+                mutationRate,
+                crossoverRate,
+                elitismRate
+            });
+
+            // Run genetic algorithm
+            const result = await gaService.assignObserversWithGA(examIds);
+
+            // Format response
+            const response = {
+                message: "Genetic algorithm assignment complete",
+                scheduleId: scheduleId,
+                algorithm: 'genetic',
+                parameters: {
+                    populationSize,
+                    generations,
+                    mutationRate,
+                    crossoverRate,
+                    elitismRate
+                },
+                totalExams: result.successful.length + result.failed.length,
+                assignedExams: result.successful.length,
+                failedExams: result.failed.length,
+                fitness: result.performance.finalFitness,
+                convergenceGeneration: result.performance.convergenceGeneration,
+                assignments: result.successful.map(s => ({
+                    examId: s.examId,
+                    examName: s.examName,
+                    headObserver: s.head,
+                    secretary: s.secretary
+                })),
+                failed: result.failed,
+                performance: result.performance
+            };
+
+            res.json(response);
+        } catch (error) {
+            console.error('Error in genetic algorithm assignment:', error);
+            res.status(500).json({
+                message: "Failed to assign observers using genetic algorithm",
+                error: error.message
+            });
+        }
     }
+
 };
 
 module.exports = assignmentController; 
