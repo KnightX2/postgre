@@ -265,8 +265,6 @@ class GeneticAssignmentService {
                 // Update usage
                 this.updateObserverUsage(observerUsage, head.observerid, exam);
                 this.updateObserverUsage(observerUsage, secretary.observerid, exam);
-                
-                debugStats.successfulAssignments++;
             } else {
                 // No valid assignment
                 chromosome.push({
