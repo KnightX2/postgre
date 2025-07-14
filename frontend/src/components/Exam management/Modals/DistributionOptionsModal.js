@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
     FaRandom, 
     FaDna, 
@@ -8,6 +8,16 @@ import {
 import './DistributionOptionsModal.scss';
 
 const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
+    const [selectedAlgorithm, setSelectedAlgorithm] = useState(null);
+    const [gaParams, setGaParams] = useState({
+        populationSize: 50,
+        generations: 30,
+        mutationRate: 0.1,
+        crossoverRate: 0.7,
+        elitismRate: 0.1
+    });
+    const [showParamForm, setShowParamForm] = useState(false);
+
     const distributionAlgorithms = [
         {
             id: 'random',
@@ -45,6 +55,28 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
         }
     ];
 
+    const handleAlgorithmClick = (algorithm) => {
+        setSelectedAlgorithm(algorithm.id);
+        if (algorithm.id === 'genetic') {
+            setShowParamForm(true);
+        } else {
+            onSelectAlgorithm(algorithm.id);
+        }
+    };
+
+    const handleParamChange = (e) => {
+        const { name, value } = e.target;
+        setGaParams(prev => ({
+            ...prev,
+            [name]: name.includes('Rate') ? parseFloat(value) : parseInt(value, 10)
+        }));
+    };
+
+    const handleRunGenetic = () => {
+        onSelectAlgorithm('genetic', gaParams);
+        setShowParamForm(false);
+    };
+
     return (
         <div className="distribution-options-modal-overlay">
             <div className="distribution-options-modal">
@@ -67,8 +99,8 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
                         {distributionAlgorithms.map((algorithm) => (
                             <div 
                                 key={algorithm.id} 
-                                className="algorithm-option"
-                                onClick={() => onSelectAlgorithm(algorithm.id)}
+                                className={`algorithm-option${selectedAlgorithm === algorithm.id ? ' selected' : ''}`}
+                                onClick={() => handleAlgorithmClick(algorithm)}
                             >
                                 <div className="algorithm-icon">{algorithm.icon}</div>
                                 <div className="algorithm-details">
@@ -86,6 +118,37 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
                             </div>
                         ))}
                     </div>
+                    {showParamForm && (
+                        <div className="ga-params-form">
+                            <h4>Genetic Algorithm Parameters</h4>
+                            <form onSubmit={e => { e.preventDefault(); handleRunGenetic(); }}>
+                                <label>
+                                    Population Size:
+                                    <input type="number" name="populationSize" min="10" max="200" value={gaParams.populationSize} onChange={handleParamChange} required />
+                                </label>
+                                <label>
+                                    Generations:
+                                    <input type="number" name="generations" min="10" max="500" value={gaParams.generations} onChange={handleParamChange} required />
+                                </label>
+                                <label>
+                                    Mutation Rate:
+                                    <input type="number" name="mutationRate" min="0" max="1" step="0.01" value={gaParams.mutationRate} onChange={handleParamChange} required />
+                                </label>
+                                <label>
+                                    Crossover Rate:
+                                    <input type="number" name="crossoverRate" min="0" max="1" step="0.01" value={gaParams.crossoverRate} onChange={handleParamChange} required />
+                                </label>
+                                <label>
+                                    Elitism Rate:
+                                    <input type="number" name="elitismRate" min="0" max="1" step="0.01" value={gaParams.elitismRate} onChange={handleParamChange} required />
+                                </label>
+                                <div className="form-actions">
+                                    <button type="submit">Run Genetic Algorithm</button>
+                                    <button type="button" onClick={() => setShowParamForm(false)}>Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

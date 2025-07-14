@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FaSearch, FaTimes, FaCheck, FaExclamationTriangle, FaClipboardList } from 'react-icons/fa';
 import axios from 'axios';
 import DistributionOptionsModal from './Modals/DistributionOptionsModal';
+import AssignmentResultsModal from './Modals/AssignmentResultsModal';
 import './AssignmentsView.scss';
 
 const AssignmentsView = () => {
@@ -11,6 +12,8 @@ const AssignmentsView = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSchedule, setSelectedSchedule] = useState(null);
     const [showDistributionModal, setShowDistributionModal] = useState(false);
+    const [resultsModalOpen, setResultsModalOpen] = useState(false);
+    const [assignmentResults, setAssignmentResults] = useState(null);
 
     useEffect(() => {
         fetchScheduleAssignments();
@@ -56,7 +59,7 @@ const AssignmentsView = () => {
         setShowDistributionModal(true);
     };
 
-    const handleAlgorithmSelection = async (algorithmId) => {
+    const handleAlgorithmSelection = async (algorithmId, customParams) => {
         try {
             const token = localStorage.getItem('authToken');
             let endpoint = '';
@@ -67,8 +70,7 @@ const AssignmentsView = () => {
                 endpoint = `http://localhost:3000/api/exams/distribute/random/${selectedSchedule.scheduleId}`;
             } else if (algorithmId === 'genetic') {
                 endpoint = `http://localhost:3000/api/assignments/schedules/${selectedSchedule.scheduleId}/assign-genetic`;
-                // You can customize genetic algorithm parameters here if needed
-                requestBody = {
+                requestBody = customParams || {
                     populationSize: 50,
                     generations: 30,
                     mutationRate: 0.1,
@@ -91,26 +93,12 @@ const AssignmentsView = () => {
             );
 
             // Handle response based on algorithm type
-            if (algorithmId === 'random') {
-                const { assignments, totalExams, assignedExams } = response.data;
-                
-                alert(`Distribution Complete!\n` +
-                      `Total Exams: ${totalExams}\n` +
-                      `Assigned Exams: ${assignedExams}\n` +
-                      `Assignments: ${assignments.map(a => 
-                          `Exam ${a.examId}: Head - ${a.headObserver}, Secretary - ${a.secretary}`
-                      ).join('\n')}`
-                );
-            } else if (algorithmId === 'genetic') {
-                const { totalExams, assignedExams, failedExams, fitness, convergenceGeneration } = response.data;
-                
-                alert(`Genetic Algorithm Distribution Complete!\n` +
-                      `Total Exams: ${totalExams}\n` +
-                      `Successful Assignments: ${assignedExams}\n` +
-                      `Failed Assignments: ${failedExams}\n` +
-                      `Best Fitness Score: ${fitness ? fitness.toFixed(3) : 'N/A'}\n` +
-                      `Converged at Generation: ${convergenceGeneration || 'N/A'}`
-                );
+            if (algorithmId === 'random' || algorithmId === 'genetic') {
+                setAssignmentResults({
+                    algorithm: algorithmId,
+                    ...response.data
+                });
+                setResultsModalOpen(true);
             } else if (algorithmId === 'compare') {
                 const { comparison, appliedAlgorithm, message } = response.data;
                 
@@ -235,6 +223,13 @@ const AssignmentsView = () => {
                     schedule={selectedSchedule}
                     onClose={() => setShowDistributionModal(false)}
                     onSelectAlgorithm={handleAlgorithmSelection}
+                />
+            )}
+            {resultsModalOpen && assignmentResults && (
+                <AssignmentResultsModal
+                    open={resultsModalOpen}
+                    onClose={() => setResultsModalOpen(false)}
+                    results={assignmentResults}
                 />
             )}
         </div>
