@@ -11,6 +11,7 @@ const {
 } = require('../utils/dateTimeUtils');
 const ObserverUtils = require('../utils/observerUtils');
 const AssignmentValidationService = require('./assignmentValidationService');
+const { buildSafeBulkUpdateQuery, logSqlOperation } = require('../utils/sqlUtils');
 // ChromosomeStrategyService removed - using built-in methods instead
 
 const { GA_CONSTANTS, GA_STRATEGY_NAMES, GA_MUTATION_TYPES } = require('../constants/geneticAlgorithmConstants');
@@ -2168,21 +2169,21 @@ class GeneticAssignmentService {
             await client.query(insertQuery, assignmentInserts.flat());
         }
         
-        // Update exam schedules
+        // Update exam schedules using SAFE parameterized queries
         if (examUpdates.length > 0) {
-            const updateQuery = `
-                UPDATE ExamSchedule
-                SET 
-                    Status = 'assigned',
-                    ExamHead = CASE ExamID
-                        ${examUpdates.map(u => `WHEN ${u.examId} THEN ${u.headId}`).join(' ')}
-                    END,
-                    ExamSecretary = CASE ExamID
-                        ${examUpdates.map(u => `WHEN ${u.examId} THEN ${u.secretaryId}`).join(' ')}
-                    END
-                WHERE ExamID IN (${examUpdates.map(u => u.examId).join(', ')})
-            `;
-            await client.query(updateQuery);
+            try {
+                const safeUpdateQuery = buildSafeBulkUpdateQuery(examUpdates);
+                if (safeUpdateQuery) {
+                    const result = await client.query(safeUpdateQuery.query, safeUpdateQuery.params);
+                    logSqlOperation('UPDATE', 'ExamSchedule', result.rowCount, { 
+                        algorithm: 'genetic',
+                        examCount: examUpdates.length 
+                    });
+                }
+            } catch (sqlError) {
+                console.error('[SECURITY] SQL injection attempt blocked in GA:', sqlError.message);
+                throw new Error('Invalid data provided for exam updates');
+            }
         }
         
         return results;

@@ -3,92 +3,118 @@ const GeneticAssignmentService = require('../services/geneticAssignmentService')
 const LinearProgrammingAssignmentService = require('../services/linearProgrammingAssignmentService');
 const AssignmentQualityMetrics = require('../utils/assignmentQualityMetrics');
 const AlgorithmComparison = require('../utils/compareAlgorithms');
+const logger = require('../utils/logger');
+const { 
+    asyncHandler, 
+    createValidationError, 
+    createNotFoundError, 
+    createDatabaseError,
+    createBusinessError 
+} = require('../utils/errorHandler');
 
 // Controller methods
 const assignmentController = {
     // Get all exams
-    getAllExams: async (req, res) => {
-        try {
-            const result = await client.query('SELECT * FROM ExamSchedule ORDER BY ExamDate, StartTime');
-            res.json({
-                success: true,
-                exams: result.rows
-            });
-        } catch (error) {
-            console.error('Error getting exams:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error getting exams',
-                error: error.message
-            });
-        }
-    },
+    getAllExams: asyncHandler(async (req, res) => {
+        const result = await client.query('SELECT * FROM ExamSchedule ORDER BY ExamDate, StartTime');
+        
+        logger.info('Retrieved exams successfully', {
+            examCount: result.rows.length,
+            userId: req.user?.userId
+        });
+
+        res.json({
+            success: true,
+            message: 'Exams retrieved successfully',
+            data: { exams: result.rows }
+        });
+    }),
 
     // Get assignments for a specific exam
-    getExamAssignments: async (req, res) => {
-        try {
-            const { examId } = req.params;
-            const result = await client.query(`
-                SELECT 
-                    ea.*,
-                    o.Name as ObserverName,
-                    o.Title as ObserverTitle
-                FROM ExamAssignment ea
-                JOIN Observer o ON ea.ObserverID = o.ObserverID
-                WHERE ea.ExamID = $1 AND ea.Status = 'active'
-            `, [examId]);
-            
-            res.json({
-                success: true,
-                assignments: result.rows
-            });
-        } catch (error) {
-            console.error('Error getting exam assignments:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error getting exam assignments',
-                error: error.message
-            });
+    getExamAssignments: asyncHandler(async (req, res) => {
+        const { examId } = req.params;
+
+        if (!examId || isNaN(parseInt(examId))) {
+            throw createValidationError('Valid exam ID is required', 'examId');
         }
-    },
+
+        const result = await client.query(`
+            SELECT 
+                ea.*,
+                o.Name as ObserverName,
+                o.Title as ObserverTitle
+            FROM ExamAssignment ea
+            JOIN Observer o ON ea.ObserverID = o.ObserverID
+            WHERE ea.ExamID = $1 AND ea.Status = 'active'
+        `, [examId]);
+        
+        logger.info('Retrieved exam assignments', {
+            examId,
+            assignmentCount: result.rows.length,
+            userId: req.user?.userId
+        });
+
+        res.json({
+            success: true,
+            message: 'Exam assignments retrieved successfully',
+            data: { assignments: result.rows }
+        });
+    }),
 
     // Get assignments for a specific observer
-    getObserverAssignments: async (req, res) => {
-        try {
-            const { observerId } = req.params;
-            const result = await client.query(`
-                SELECT 
-                    ea.*,
-                    e.ExamName,
-                    e.ExamDate,
-                    e.StartTime,
-                    e.EndTime
-                FROM ExamAssignment ea
-                JOIN ExamSchedule e ON ea.ExamID = e.ExamID
-                WHERE ea.ObserverID = $1 AND ea.Status = 'active'
-                ORDER BY e.ExamDate, e.StartTime
-            `, [observerId]);
-            
-            res.json({
-                success: true,
-                assignments: result.rows
-            });
-        } catch (error) {
-            console.error('Error getting observer assignments:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error getting observer assignments',
-                error: error.message
-            });
+    getObserverAssignments: asyncHandler(async (req, res) => {
+        const { observerId } = req.params;
+
+        if (!observerId || isNaN(parseInt(observerId))) {
+            throw createValidationError('Valid observer ID is required', 'observerId');
         }
-    },
+
+        const result = await client.query(`
+            SELECT 
+                ea.*,
+                e.ExamName,
+                e.ExamDate,
+                e.StartTime,
+                e.EndTime
+            FROM ExamAssignment ea
+            JOIN ExamSchedule e ON ea.ExamID = e.ExamID
+            WHERE ea.ObserverID = $1 AND ea.Status = 'active'
+            ORDER BY e.ExamDate, e.StartTime
+        `, [observerId]);
+        
+        logger.info('Retrieved observer assignments', {
+            observerId,
+            assignmentCount: result.rows.length,
+            userId: req.user?.userId
+        });
+
+        res.json({
+            success: true,
+            message: 'Observer assignments retrieved successfully',
+            data: { assignments: result.rows }
+        });
+    }),
 
     // Manual assignment of observers
-    assignObservers: async (req, res) => {
-        try {
-            const { examId } = req.params;
-            const { headId, secretaryId } = req.body;
+    assignObservers: asyncHandler(async (req, res) => {
+        const { examId } = req.params;
+        const { headId, secretaryId } = req.body;
 
+        // Validation
+        if (!examId || isNaN(parseInt(examId))) {
+            throw createValidationError('Valid exam ID is required', 'examId');
+        }
+        if (!headId || isNaN(parseInt(headId))) {
+            throw createValidationError('Valid head observer ID is required', 'headId');
+        }
+        if (!secretaryId || isNaN(parseInt(secretaryId))) {
+            throw createValidationError('Valid secretary observer ID is required', 'secretaryId');
+        }
+        if (headId === secretaryId) {
+            throw createBusinessError('Head and secretary observers must be different');
+        }
+
+        try {
             await client.query('BEGIN');
 
             // Deactivate existing assignments
@@ -105,47 +131,57 @@ const assignmentController = {
 
             await client.query('COMMIT');
 
+            logger.info('Observers assigned successfully', {
+                examId,
+                headId,
+                secretaryId,
+                userId: req.user?.userId
+            });
+
             res.json({
                 success: true,
                 message: 'Observers assigned successfully'
             });
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('Error assigning observers:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error assigning observers',
-                error: error.message
-            });
+            throw createDatabaseError('Failed to assign observers', error);
         }
-    },
+    }),
 
     // Handle observer unavailability
-    handleObserverUnavailability: async (req, res) => {
+    handleObserverUnavailability: asyncHandler(async (req, res) => {
+        const { examId, observerId } = req.params;
+        const { reason } = req.body;
+
+        // Validation
+        if (!examId || isNaN(parseInt(examId))) {
+            throw createValidationError('Valid exam ID is required', 'examId');
+        }
+        if (!observerId || isNaN(parseInt(observerId))) {
+            throw createValidationError('Valid observer ID is required', 'observerId');
+        }
+        if (!reason || reason.trim().length === 0) {
+            throw createValidationError('Reason for unavailability is required', 'reason');
+        }
+
+        // Get exam details
+        const examResult = await client.query(
+            'SELECT * FROM ExamSchedule WHERE ExamID = $1',
+            [examId]
+        );
+
+        if (examResult.rows.length === 0) {
+            throw createNotFoundError('Exam');
+        }
+
         try {
-            const { examId, observerId } = req.params;
-            const { reason } = req.body;
-
-            // Get exam details
-            const examResult = await client.query(
-                'SELECT * FROM ExamSchedule WHERE ExamID = $1',
-                [examId]
-            );
-
-            if (examResult.rows.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Exam not found'
-                });
-            }
-
             await client.query('BEGIN');
             
             // Mark observer as unavailable for this exam
             await client.query(`
                 INSERT INTO ObserverUnavailability (ObserverID, ExamID, Reason)
                 VALUES ($1, $2, $3)
-            `, [observerId, examId, reason]);
+            `, [observerId, examId, reason.trim()]);
 
             // Deactivate any existing assignments
             await client.query(`
@@ -156,20 +192,21 @@ const assignmentController = {
 
             await client.query('COMMIT');
 
+            logger.info('Observer unavailability recorded', {
+                examId,
+                observerId,
+                userId: req.user?.userId
+            });
+
             res.json({
                 success: true,
-                message: 'Observer unavailability recorded'
+                message: 'Observer unavailability recorded successfully'
             });
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('Error handling observer unavailability:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error handling observer unavailability',
-                error: error.message
-            });
+            throw createDatabaseError('Failed to record observer unavailability', error);
         }
-    },
+    }),
 
     // Get available observers for an exam
     getAvailableObservers: async (req, res) => {

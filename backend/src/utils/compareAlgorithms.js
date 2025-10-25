@@ -1,5 +1,5 @@
 /**
- * Compare Random vs Genetic Algorithm Assignment Quality
+ * Compare Greedy vs Genetic Algorithm Assignment Quality
  */
 
 const fs = require('fs').promises;
@@ -7,6 +7,18 @@ const path = require('path');
 const AssignmentQualityMetrics = require('./assignmentQualityMetrics');
 
 class AlgorithmComparison {
+    /**
+     * Get display name for an algorithm
+     */
+    static getDisplayName(name) {
+        switch (name) {
+            case 'greedy': return 'Greedy Algorithm';
+            case 'genetic': return 'Genetic Algorithm';
+            case 'linear_programming': return 'Linear Programming';
+            default: return name.charAt(0).toUpperCase() + name.slice(1);
+        }
+    }
+
     /**
      * Load and compare the most recent reports from all algorithms
      */
@@ -40,8 +52,9 @@ class AlgorithmComparison {
                         examsPerSecond: data.performance?.examsPerSecond || 0
                     };
                     
-                    // Build standardized comparison entry
-                    comparison[algo] = {
+                    // Build standardized comparison entry with display name
+                    const displayName = this.getDisplayName(algo);
+                    comparison[displayName] = {
                         overallScore: data.overallScore || '0%',
                         coverage: data.coverage || '0%',
                         workloadBalance: data.workloadBalance || '0',
@@ -110,13 +123,13 @@ class AlgorithmComparison {
         console.log('getRecommendation called with:', JSON.stringify(comparison, null, 2));
         
         // Check if comparison has the expected structure
-        if (!comparison || !comparison['Random Algorithm'] || !comparison['Genetic Algorithm']) {
+        if (!comparison || !comparison['Greedy Algorithm'] || !comparison['Genetic Algorithm']) {
             console.error('Invalid comparison structure');
             return 'Unable to generate recommendation - invalid comparison data';
         }
         
         // Extract percentage values and convert to numbers
-        const randomScore = parseFloat(comparison['Random Algorithm'].overallScore);
+        const greedyScore = parseFloat(comparison['Greedy Algorithm'].overallScore);
         const gaScore = parseFloat(comparison['Genetic Algorithm'].overallScore);
         
         // Extract speedup value (remove 'x slower' or 'x faster' suffix)
@@ -124,20 +137,20 @@ class AlgorithmComparison {
         const speedupValue = parseFloat(speedupStr);
         const isFaster = speedupStr.includes('faster');
         
-        const scoreDiff = gaScore - randomScore;
+        const scoreDiff = gaScore - greedyScore;
         
         if (scoreDiff > 10) {
             return 'Use Genetic Algorithm - significantly better quality';
         } else if (scoreDiff > 5) {
             return 'Consider Genetic Algorithm - moderately better quality';
         } else if (scoreDiff < -10) {
-            return 'Use Random Algorithm - significantly better quality';
+            return 'Use Greedy Algorithm - significantly better quality';
         } else if (scoreDiff < -5) {
-            return 'Consider Random Algorithm - moderately better quality';
+            return 'Consider Greedy Algorithm - moderately better quality';
         } else if (isFaster && speedupValue > 2) {
             return 'Use Genetic Algorithm - similar quality but faster';
         } else if (!isFaster && speedupValue > 2) {
-            return 'Use Random Algorithm - similar quality but faster';
+            return 'Use Greedy Algorithm - similar quality but faster';
         } else {
             return 'Both algorithms perform similarly - choose based on your priorities';
         }
@@ -163,27 +176,27 @@ class AlgorithmComparison {
         console.log('Quality Metrics:');
         console.table({
             'Overall Score': {
-                Random: comparison['Random Algorithm'].overallScore,
+                Greedy: comparison['Greedy Algorithm'].overallScore,
                 Genetic: comparison['Genetic Algorithm'].overallScore,
                 Improvement: comparison.improvement.overallScore
             },
             'Coverage': {
-                Random: comparison['Random Algorithm'].coverage,
+                Greedy: comparison['Greedy Algorithm'].coverage,
                 Genetic: comparison['Genetic Algorithm'].coverage,
                 Improvement: comparison.improvement.coverage
             },
             'Workload Balance': {
-                Random: comparison['Random Algorithm'].workloadBalance,
+                Greedy: comparison['Greedy Algorithm'].workloadBalance,
                 Genetic: comparison['Genetic Algorithm'].workloadBalance,
                 Improvement: comparison.improvement.workloadBalance
             },
             'Fairness': {
-                Random: comparison['Random Algorithm'].fairness,
+                Greedy: comparison['Greedy Algorithm'].fairness,
                 Genetic: comparison['Genetic Algorithm'].fairness,
                 Improvement: comparison.improvement.fairness
             },
             'Efficiency': {
-                Random: comparison['Random Algorithm'].efficiency,
+                Greedy: comparison['Greedy Algorithm'].efficiency,
                 Genetic: comparison['Genetic Algorithm'].efficiency,
                 Improvement: comparison.improvement.efficiency
             }
@@ -379,15 +392,15 @@ class AlgorithmComparison {
         return 'F';
     }
 
-    static getRecommendationForDirectComparison(randomQuality, geneticQuality, speedup) {
-        const qualityDiff = (geneticQuality.overallScore.score - randomQuality.overallScore.score) * 100;
+    static getRecommendationForDirectComparison(greedyQuality, geneticQuality, speedup) {
+        const qualityDiff = (geneticQuality.overallScore.score - greedyQuality.overallScore.score) * 100;
         
         if (qualityDiff > 10) {
             return "Use Genetic Algorithm for significantly better quality";
         } else if (qualityDiff > 5) {
             return "Use Genetic Algorithm for better quality";
         } else if (qualityDiff < -10) {
-            return "Use Random Algorithm for better quality";
+            return "Use Greedy Algorithm for better quality";
         } else if (speedup.includes('faster') && parseFloat(speedup) > 2) {
             return "Use Genetic Algorithm for better performance";
         } else {

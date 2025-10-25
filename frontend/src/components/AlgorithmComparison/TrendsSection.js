@@ -8,7 +8,7 @@ const TrendsSection = ({ trends }) => {
             <h2>Historical Performance Trends</h2>
             <div className="trends-grid">
                 <div className="trend-box">
-                    <h3>Random Algorithm ({trends.random.count} runs)</h3>
+                    <h3>Greedy Algorithm ({trends.greedy.count} runs)</h3>
                     <div className="trend-stat">
                         <span className="label">Average Success Rate:</span>
                         <span className="value">{trends.random.avgSuccessRate}%</span>

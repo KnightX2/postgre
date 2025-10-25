@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const userObserverController = require('../controllers/userObserverController');
 const { authenticateToken, authorizeAdmin } = require('../middleware/authMiddleware');
+const logger = require('../utils/logger');
 
 // Apply authentication middleware to all routes
 router.use(authenticateToken);
@@ -34,29 +35,16 @@ const {
     uploadObservers
 } = require('../controllers/userObserverController');
 
-// Modify the upload route to match frontend expectations
+// Observer upload route with proper security
 router.post('/observers/upload', 
-    (req, res, next) => {
-        console.log('--- UPLOAD ROUTE MIDDLEWARE ---');
-        console.log('Request Headers:', req.headers);
-        console.log('Request Body:', req.body);
-        next();
-    },
     authenticateToken, 
-    (req, res, next) => {
-        console.log('--- AFTER AUTH TOKEN ---');
-        console.log('Authenticated User:', req.user);
-        next();
-    },
     authorizeAdmin,
-    (req, res, next) => {
-        console.log('--- AFTER AUTHORIZE ADMIN ---');
-        next();
-    },
     userObserverController.upload,
     (req, res, next) => {
-        console.log('--- AFTER MULTER UPLOAD ---');
-        console.log('Uploaded Files:', req.files);
+        logger.info('File upload processing completed', { 
+            userId: req.user?.userId,
+            fileCount: req.files?.length || 0 
+        });
         next();
     },
     userObserverController.uploadObservers

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const { client } = require('../../database/db.js');
+const logger = require('../utils/logger');
 
 let adminRoleId = null;
 
@@ -11,14 +12,14 @@ const getAdminRoleId = async () => {
         adminRoleId = result.rows[0]?.roleid;
         return adminRoleId;
     } catch (err) {
-        console.error('Database error:', err);
+        logger.error('Database error fetching admin role', { error: err.message, stack: err.stack });
         throw new Error('Failed to fetch admin role ID');
     }
 };
 
 const authenticateToken = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
-    console.log('Token received:', token); // Log the token
+    logger.debug('Authentication attempt', { ip: req.ip || 'unknown IP' });
     if (!token) {
         return res.status(401).json({ message: 'No token provided' });
     }
@@ -34,8 +35,7 @@ const authenticateToken = (req, res, next) => {
 
 const authorizeAdmin = async (req, res, next) => {
     const adminRole = await getAdminRoleId();
-    console.log('Admin Role ID:', adminRole);
-    console.log('User Role ID:', req.user.roleId);
+    logger.debug('Admin authorization check', { userRoleId: req.user.roleId, requiredRoleId: adminRole });
     
     if (req.user.roleId !== adminRole) {
         return res.status(403).json({ 

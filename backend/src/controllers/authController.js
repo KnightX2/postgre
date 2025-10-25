@@ -1,16 +1,23 @@
 const { client } = require('../../database/db.js');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const logger = require('../utils/logger');
+const { 
+    asyncHandler, 
+    createValidationError, 
+    createAuthError, 
+    createDatabaseError,
+    AppError,
+    ERROR_CODES 
+} = require('../utils/errorHandler');
 require('dotenv').config();
 
-const registerUser = async (req, res) => {
+const registerUser = asyncHandler(async (req, res) => {
     const { name, email, phoneNum, password, role } = req.body;
 
     if (!name || !email || !phoneNum || !password) {
-        return res.status(400).json({ message: 'All fields are required' });
+        throw createValidationError('All fields are required');
     }
-
-    try {
         // Check if email already exists
         const existingUser = await client.query(
             `SELECT * FROM UserInfo WHERE Email = $1`,
@@ -19,11 +26,11 @@ const registerUser = async (req, res) => {
 
         // Validate role
         if (!['normal_user', 'admin', 'observer'].includes(role)) {
-            return res.status(400).json({ message: 'Invalid role' });
+            throw createValidationError('Invalid role specified');
         }
 
         if (existingUser.rows.length > 0) {
-            return res.status(400).json({ message: 'Email already in use' });
+            throw new AppError('Email already in use', ERROR_CODES.VALIDATION_ERROR, 409);
         }
 
         // Hash the password
@@ -45,7 +52,7 @@ const registerUser = async (req, res) => {
         );
 
         if (roleResult.rows.length === 0) {
-            throw new Error('Role not found');
+            throw createDatabaseError('Role configuration error');
         }
 
         const roleId = roleResult.rows[0].roleid;
@@ -57,26 +64,21 @@ const registerUser = async (req, res) => {
             [userInfoId, roleId]
         );
 
-        res.status(201).json({ message: 'User registered successfully', userId: userResult.rows[0].userid });
-    } catch (err) {
-        console.error('Error registering user:', err);
-        res.status(500).json({ message: 'Server error', error: err.message });
-    }
-};
+        res.status(201).json({ 
+            success: true,
+            message: 'User registered successfully', 
+            data: { userId: userResult.rows[0].userid }
+        });
+});
 
-const login = async (req, res) => {
+const login = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-        return res.status(400).json({ message: 'Email and password are required' });
+        throw createValidationError('Email and password are required');
     }
-
-    try {
-        // Log the login attempt
-        console.log('Login Attempt:', {
-            email,
-            passwordLength: password.length
-        });
+        // Log the login attempt securely
+        logger.logAuthAttempt(email, false, 'attempt_started');
 
         const result = await client.query(
             `SELECT ui.ID, ui.Password, ui.Email, u.UserID, u.RoleID, r.RoleName
@@ -87,79 +89,41 @@ const login = async (req, res) => {
             [email]
         );
 
-        console.log('Database Query Results:', {
-            rowCount: result.rows.length,
-            userDetails: result.rows.map(row => ({
-                id: row.id,
-                email: row.email,
-                passwordHash: row.password ? row.password.substring(0, 10) + '...' : 'NO HASH',
-                roleId: row.roleid,
-                roleName: row.rolename
-            }))
-        });
+        logger.logDatabaseOperation('SELECT', 'UserInfo', true);
 
         if (result.rows.length === 0) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            logger.logAuthAttempt(email, false, 'user_not_found');
+            throw createAuthError('Invalid email or password');
         }
 
         const user = result.rows[0];
 
-        // Log the retrieved user data for debugging
-        console.log('Retrieved user data:', user);
+        // User authentication data retrieved successfully
 
         // Ensure the hashed password exists
         if (!user.password) {
-            console.error('Password not found for user:', user);
-            return res.status(500).json({ message: 'User password not found' });
+            logger.error('Password not found for user', { userId: user.id });
+            throw createDatabaseError('User authentication data corrupted');
         }
 
-        // Detailed password comparison logging
-        console.log('Password Comparison:', {
-            inputPassword: password,
-            inputPasswordLength: password.length,
-            storedHashLength: user.password ? user.password.length : 'N/A',
-            storedHashStart: user.password ? user.password.substring(0, 10) : 'N/A'
-        });
+        // Password validation initiated
 
-        // Detailed bcrypt comparison
+        // Password validation
         try {
-            console.log('Bcrypt Debugging:', {
-                bcryptVersion: require('bcrypt').version,
-                nodeVersion: process.version
-            });
-
-            // Manually hash the input password with the same method
-            const manualHash = await bcrypt.hash(password, 10);
-            
-            console.log('Manual Hash Comparison:', {
-                inputPasswordManualHash: manualHash,
-                storedHash: user.password,
-                manualHashLength: manualHash.length,
-                storedHashLength: user.password.length,
-                hashesEqual: manualHash === user.password
-            });
-
-            const passwordCompareStart = Date.now();
             const isPasswordValid = await bcrypt.compare(password, user.password);
-            const passwordCompareTime = Date.now() - passwordCompareStart;
-
-            console.log('Password Comparison Result:', {
-                isValid: isPasswordValid,
-                comparisonTime: `${passwordCompareTime}ms`
-            });
-
+            
             if (!isPasswordValid) {
-                // Try alternative comparison methods
-                console.log('Alternative Comparison Attempts:', {
-                    directCompare: password === user.password,
-                    trimmedCompare: password.trim() === user.password.trim()
-                });
-
-                return res.status(401).json({ message: 'Invalid email or password' });
+                logger.logAuthAttempt(email, false, 'invalid_password');
+                throw createAuthError('Invalid email or password');
             }
+            
+            logger.logAuthAttempt(email, true, 'success');
         } catch (compareError) {
-            console.error('Bcrypt Compare Error:', compareError);
-            return res.status(500).json({ message: 'Internal authentication error', error: compareError.message });
+            logger.error('Bcrypt comparison failed', { 
+                error: compareError.message, 
+                email 
+            });
+            throw createDatabaseError('Authentication system error');
         }
 
         // Generate a JWT token
@@ -170,35 +134,40 @@ const login = async (req, res) => {
         );
 
         // Return the token and user data
-        return res.json({
-            token,
-            userId: user.userid,
-            roleId: user.roleid,
-            isAdmin: user.roleid === 2 // Ensure this matches the admin role ID
+        res.json({
+            success: true,
+            message: 'Login successful',
+            data: {
+                token,
+                userId: user.userid,
+                roleId: user.roleid,
+                isAdmin: user.roleid === 2
+            }
         });
-    } catch (err) {
-        console.error('Error during login:', err);
-        res.status(500).json({ message: 'Internal server error', error: err.message });
-    }
-};
+});
 
-const validateToken = (req, res) => {
+const validateToken = asyncHandler(async (req, res) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
+    
     if (!token) {
-        return res.status(401).json({ message: 'No token provided' });
+        throw createAuthError('No token provided');
     }
 
     try {
         // Verify the token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        res.status(200).json({ valid: true, user: decoded });
+        res.status(200).json({ 
+            success: true,
+            valid: true, 
+            data: { user: decoded }
+        });
     } catch (err) {
         if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ message: 'Token expired' });
+            throw createAuthError('Token expired');
         }
-        res.status(403).json({ message: 'Invalid token' });
+        throw createAuthError('Invalid token');
     }
-};
+});
 
 module.exports = { 
     login,

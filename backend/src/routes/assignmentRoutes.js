@@ -4,6 +4,7 @@ const assignmentController = require('../controllers/assignmentController');
 const { authenticateToken } = require('../middleware/authMiddleware');
 const { upload, handleUploadError } = require('../middleware/uploadMiddleware');
 const AlgorithmComparison = require('../utils/compareAlgorithms');
+const logger = require('../utils/logger');
 
 // All routes should be protected
 router.use(authenticateToken);
@@ -40,13 +41,12 @@ router.post(
 // Algorithm comparison routes
 router.get('/algorithms/compare', async (req, res) => {
     try {
-        console.log('Request Body:', req.body);
-        console.log('Token received:', req.headers.authorization);
+        logger.info('Algorithm comparison requested', { userId: req.user?.userId });
         
         const comparison = await AlgorithmComparison.compareLatestReports();
         
         if (!comparison) {
-            console.log('No comparison data returned');
+            logger.warn('No comparison data available', { userId: req.user?.userId });
             return res.status(404).json({
                 success: false,
                 message: 'No algorithm reports found. Please run at least one algorithm first.'
@@ -54,16 +54,21 @@ router.get('/algorithms/compare', async (req, res) => {
         }
         
         // Log the structure of the comparison data
-        console.log('Comparison data structure:', 
-            Object.keys(comparison).map(key => `${key}: ${typeof comparison[key]}`));
+        logger.debug('Comparison data structure', { 
+            keys: Object.keys(comparison),
+            userId: req.user?.userId 
+        });
         
         res.json({
             success: true,
             comparison: comparison
         });
     } catch (error) {
-        console.error('Error comparing algorithms:', error);
-        console.error('Stack trace:', error.stack);
+        logger.error('Error comparing algorithms', { 
+            error: error.message, 
+            stack: error.stack,
+            userId: req.user?.userId 
+        });
         
         // Send a more descriptive error message
         res.status(500).json({
@@ -83,7 +88,11 @@ router.get('/algorithms/trends', async (req, res) => {
             trends: trends
         });
     } catch (error) {
-        console.error('Error analyzing trends:', error);
+        logger.error('Error analyzing trends', { 
+            error: error.message, 
+            stack: error.stack,
+            userId: req.user?.userId 
+        });
         res.status(500).json({
             success: false,
             message: 'Error analyzing trends',

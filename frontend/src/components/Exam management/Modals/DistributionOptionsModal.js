@@ -7,11 +7,12 @@ import {
     FaCog,
     FaArrowLeft,
     FaCalculator,
-    FaPython
+    FaPython,
+    FaSpinner
 } from 'react-icons/fa';
 import './DistributionOptionsModal.scss';
 
-const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
+const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm, isLoading = false, loadingAlgorithm = '' }) => {
     const [showGeneticParams, setShowGeneticParams] = useState(false);
     const [geneticParams, setGeneticParams] = useState({
         populationSize: 200,
@@ -24,14 +25,16 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
 
     const distributionAlgorithms = [
         {
-            id: 'random',
-            name: 'Random Distribution',
-            description: 'Randomly assign observers with basic constraints',
+            id: 'greedy',
+            name: 'Greedy Algorithm Distribution',
+            description: 'Optimize observer assignments using greedy approach for workload balance',
             icon: <FaRandom />,
             constraints: [
                 'Head Observer: Must be Dr. with observer role',
                 'Secretary: Any observer',
-                'Ensures random but rule-based assignment'
+                'Prioritizes least loaded observers for fair distribution',
+                'Chronological assignment for better coverage',
+                'Fast execution with good quality results'
             ]
         },
         {
@@ -64,7 +67,7 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
             description: 'Run all three algorithms, compare results, and apply the best one',
             icon: <FaChartLine />,
             constraints: [
-                'Runs Random, Genetic, and Linear Programming algorithms',
+                'Runs Greedy, Genetic, and Linear Programming algorithms',
                 'Compares quality metrics and performance across all three',
                 'Automatically applies the best result',
                 'Shows detailed three-way comparison report'
@@ -73,6 +76,7 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
     ];
 
     const handleGeneticAlgorithmSelect = () => {
+        if (isLoading) return; // Prevent clicking when loading
         setShowGeneticParams(true);
     };
 
@@ -84,10 +88,12 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
     };
 
     const handleGeneticAlgorithmRun = () => {
+        if (isLoading) return; // Prevent clicking when loading
         onSelectAlgorithm('genetic', geneticParams);
     };
 
     const handleAlgorithmSelect = (algorithmId) => {
+        if (isLoading) return; // Prevent clicking when loading
         if (algorithmId === 'genetic') {
             handleGeneticAlgorithmSelect();
         } else {
@@ -239,8 +245,21 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
                             <button className="cancel-btn" onClick={() => setShowGeneticParams(false)}>
                                 Cancel
                             </button>
-                            <button className="run-btn" onClick={handleGeneticAlgorithmRun}>
-                                <FaDna /> Run Genetic Algorithm
+                            <button 
+                                className={`run-btn ${isLoading ? 'disabled' : ''}`} 
+                                onClick={handleGeneticAlgorithmRun}
+                                disabled={isLoading}
+                            >
+                                {isLoading && loadingAlgorithm === 'genetic' ? (
+                                    <>
+                                        <FaSpinner className="spinner" />
+                                        Running...
+                                    </>
+                                ) : (
+                                    <>
+                                        <FaDna /> Run Genetic Algorithm
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
@@ -261,8 +280,8 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
     }
 
     return (
-        <div className="distribution-options-modal-overlay">
-            <div className="distribution-options-modal">
+        <div className={`distribution-options-modal-overlay ${isLoading ? 'loading' : ''}`}>
+            <div className={`distribution-options-modal ${isLoading ? 'loading' : ''}`}>
                 <div className="modal-header">
                     <h2>Distribution Algorithms</h2>
                     {/* Remove the close (X) button */}
@@ -275,23 +294,57 @@ const DistributionOptionsModal = ({ schedule, onClose, onSelectAlgorithm }) => {
                         Total Exams: {schedule.totalExams} | Unassigned: {schedule.totalExams - schedule.assignedExams}
                     </p>
 
-                        {distributionAlgorithms.map((algorithm) => (
-                            <div 
-                                key={algorithm.id} 
-                                className="algorithm-option"
-                        onClick={() => handleAlgorithmSelect(algorithm.id)}
-                            >
-                        {algorithm.icon}
+                        {distributionAlgorithms.map((algorithm) => {
+                            const isCurrentAlgorithmLoading = isLoading && loadingAlgorithm === algorithm.id;
+                            return (
+                                <div 
+                                    key={algorithm.id} 
+                                    className={`algorithm-option ${isLoading ? 'disabled' : ''} ${isCurrentAlgorithmLoading ? 'loading' : ''}`}
+                                    onClick={() => handleAlgorithmSelect(algorithm.id)}
+                                >
+                                    {isCurrentAlgorithmLoading ? (
+                                        <div className="loading-indicator">
+                                            <FaSpinner className="spinner" />
+                                            <span>Running...</span>
+                                        </div>
+                                    ) : (
+                                        algorithm.icon
+                                    )}
                                     <h3>{algorithm.name}</h3>
                                     <p>{algorithm.description}</p>
-                                        <strong>Constraints:</strong>
-                                        <ul>
-                                            {algorithm.constraints.map((constraint, index) => (
-                                                <li key={index}>{constraint}</li>
-                                            ))}
-                                        </ul>
+                                    <strong>Constraints:</strong>
+                                    <ul>
+                                        {algorithm.constraints.map((constraint, index) => (
+                                            <li key={index}>{constraint}</li>
+                                        ))}
+                                    </ul>
+                                    {isCurrentAlgorithmLoading && (
+                                        <div className="progress-overlay">
+                                            <div className="progress-bar">
+                                                <div className="progress-fill"></div>
+                                            </div>
+                                            <p className="progress-text">Algorithm is running, please wait...</p>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        
+                        {/* Global loading overlay for the entire modal */}
+                        {isLoading && (
+                            <div className="global-loading-overlay">
+                                <div className="loading-content">
+                                    <div className="loading-spinner">
+                                        <FaSpinner className="spinner" />
+                                    </div>
+                                    <h3>Algorithm Running</h3>
+                                    <p>Please wait while the {loadingAlgorithm} algorithm processes your data...</p>
+                                    <div className="progress-bar">
+                                        <div className="progress-fill"></div>
+                                    </div>
+                                </div>
                             </div>
-                        ))}
+                        )}
             </div>
         </div>
     );

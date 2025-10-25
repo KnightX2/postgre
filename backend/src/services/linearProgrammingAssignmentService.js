@@ -2,6 +2,7 @@ const { client } = require('../../database/db');
 const fs = require('fs').promises;
 const path = require('path');
 const glpkInit = require('glpk.js');
+const logger = require('../utils/logger');
 const { 
   parseTimeToMinutes, 
   getDayName, 
@@ -37,9 +38,9 @@ class LinearProgrammingAssignmentService {
     this.logMessages.push(logEntry);
     
     if (data) {
-      console.log(logEntry, data);
+      logger.debug(message, data);
     } else {
-      console.log(logEntry);
+      logger.debug(message);
     }
   }
   
@@ -92,7 +93,7 @@ class LinearProgrammingAssignmentService {
     const logContent = this.logMessages.join('\n');
     
     await fs.writeFile(logPath, logContent);
-    console.log(`[JS-LP] Log file saved: ${filename}`);
+    logger.info('LP log file saved', { filename });
     
     return logPath;
   }
@@ -215,6 +216,9 @@ class LinearProgrammingAssignmentService {
       await this.applySolution(completeAssignments, examIds);
       
       this.log(`[HYBRID] Success! ${completeAssignments.length}/${data.exams.length} exams assigned`);
+      
+      // Save performance metrics
+      await this.savePerformanceReport(completeAssignments, data);
       
       return {
         assignments: completeAssignments,
@@ -433,15 +437,29 @@ class LinearProgrammingAssignmentService {
       const totalTimeMs = Date.now() - algorithmStartTime;
       this.log(`[PURE-LP] Success! ${assignments.length}/${data.exams.length} exams assigned`);
       
-      return {
-        assignments,
-        stats: {
-          algorithm: 'pure-glpk',
-          timeTakenMs: totalTimeMs,
-          examsCovered: assignments.length,
-          constraintsViolated: 0
-        }
+      // Format results in the expected structure
+      const results = {
+        successful: assignments.map(assignment => ({
+          examId: assignment.examId,
+          examName: assignment.examName,
+          headId: assignment.headId,
+          secretaryId: assignment.secretaryId,
+          head: data.observers.find(o => o.id === assignment.headId)?.name || 'Unknown',
+          secretary: data.observers.find(o => o.id === assignment.secretaryId)?.name || 'Unknown'
+        })),
+        failed: data.exams.filter(exam => 
+          !assignments.some(a => a.examId === exam.id)
+        ).map(exam => ({
+          examId: exam.id,
+          examName: exam.name,
+          reason: 'No available observers'
+        }))
       };
+      
+      // Save performance metrics
+      await this.savePerformanceReport(assignments, data);
+      
+      return results;
       
     } catch (error) {
       this.log(`[PURE-LP] Error: ${error.message}`);
@@ -590,15 +608,29 @@ class LinearProgrammingAssignmentService {
       const totalTimeMs = Date.now() - algorithmStartTime;
       this.log(`[GREEDY] Completed in ${totalTimeMs}ms! ${assignedCount}/${data.exams.length} exams assigned (${(assignedCount/data.exams.length*100).toFixed(1)}%)`);
       
-      return {
-        assignments,
-        stats: {
-          algorithm: 'greedy-optimized',
-          timeTakenMs: totalTimeMs,
-          examsCovered: assignedCount,
-          constraintsViolated: 0
-        }
+      // Format results in the expected structure
+      const results = {
+        successful: assignments.map(assignment => ({
+          examId: assignment.examId,
+          examName: data.exams.find(e => e.id === assignment.examId)?.name || 'Unknown',
+          headId: assignment.headId,
+          secretaryId: assignment.secretaryId,
+          head: data.observers.find(o => o.id === assignment.headId)?.name || 'Unknown',
+          secretary: data.observers.find(o => o.id === assignment.secretaryId)?.name || 'Unknown'
+        })),
+        failed: data.exams.filter(exam => 
+          !assignments.some(a => a.examId === exam.id)
+        ).map(exam => ({
+          examId: exam.id,
+          examName: exam.name,
+          reason: 'No available observers'
+        }))
       };
+      
+      // Save performance metrics
+      await this.savePerformanceReport(assignments, data);
+      
+      return results;
       
     } catch (error) {
       this.log(`[GREEDY] Error: ${error.message}`);
@@ -633,16 +665,29 @@ class LinearProgrammingAssignmentService {
       this.log(`[MAX-COVERAGE] COMPLETED in ${totalTimeMs}ms!`);
       this.log(`[MAX-COVERAGE] Final result: ${finalAssignments.length}/${data.exams.length} exams assigned (${coveragePercent}%)`);
       
-      return {
-        assignments: finalAssignments,
-        stats: {
-          algorithm: 'maximum-coverage',
-          timeTakenMs: totalTimeMs,
-          examsCovered: finalAssignments.length,
-          coveragePercent: parseFloat(coveragePercent),
-          constraintsViolated: 0
-        }
+      // Format results in the expected structure
+      const results = {
+        successful: finalAssignments.map(assignment => ({
+          examId: assignment.examId,
+          examName: data.exams.find(e => e.id === assignment.examId)?.name || 'Unknown',
+          headId: assignment.headId,
+          secretaryId: assignment.secretaryId,
+          head: data.observers.find(o => o.id === assignment.headId)?.name || 'Unknown',
+          secretary: data.observers.find(o => o.id === assignment.secretaryId)?.name || 'Unknown'
+        })),
+        failed: data.exams.filter(exam => 
+          !finalAssignments.some(a => a.examId === exam.id)
+        ).map(exam => ({
+          examId: exam.id,
+          examName: exam.name,
+          reason: 'No available observers'
+        }))
       };
+      
+      // Save performance metrics
+      await this.savePerformanceReport(finalAssignments, data);
+      
+      return results;
       
     } catch (error) {
       this.log(`[MAX-COVERAGE] Error: ${error.message}`);
@@ -1858,19 +1903,45 @@ class LinearProgrammingAssignmentService {
     try {
       const MetricsService = require('./metricsService');
       
+      // Convert exam data back to the format expected by AssignmentQualityMetrics
+      const standardizedExams = data.exams.map(exam => ({
+        examid: exam.id,
+        examname: exam.name,
+        examdate: exam.date,
+        starttime: exam.startTime,
+        endtime: exam.endTime,
+        scheduleid: exam.scheduleId
+      }));
+
+      const standardizedData = {
+        ...data,
+        exams: standardizedExams
+      };
+      
       // Format results in the standard structure
       const results = {
-        successful: assignments,
-        failed: data.exams.filter(exam => 
+        successful: assignments.map(assignment => ({
+          examId: assignment.examId,
+          examName: data.exams.find(e => e.id === assignment.examId)?.name || 'Unknown',
+          headId: assignment.headId,
+          secretaryId: assignment.secretaryId,
+          head: data.observers.find(o => o.id === assignment.headId)?.name || 'Unknown',
+          secretary: data.observers.find(o => o.id === assignment.secretaryId)?.name || 'Unknown'
+        })),
+        failed: standardizedData.exams.filter(exam => 
           !assignments.some(a => a.examId === exam.examid)
-        )
+        ).map(exam => ({
+          examId: exam.examid,
+          examName: exam.examname,
+          reason: 'No available observers'
+        }))
       };
       
       // Calculate execution time
       const executionTime = Date.now() - this.startTime;
       
       // Save metrics using central service
-      await MetricsService.saveMetrics('lp', results, data, {
+      await MetricsService.saveMetrics('linear_programming', results, standardizedData, {
         executionTime,
         solver: 'glpk',
         timeLimit: this.timeLimit,
@@ -1878,9 +1949,9 @@ class LinearProgrammingAssignmentService {
         objectiveValue: this.lastObjectiveValue
       });
       
-      console.log('LP performance metrics saved successfully');
+      logger.info('LP performance metrics saved successfully');
     } catch (error) {
-      console.error('Error saving LP performance report:', error);
+      logger.error('Error saving LP performance report', { error: error.message });
     }
   }
 

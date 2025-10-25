@@ -1,12 +1,13 @@
 const express = require('express');
 const { registerUser, login, validateToken } = require('../controllers/authController');
 const { authenticateToken, authorizeAdmin } = require('../middleware/authMiddleware');
+const { validateLogin, validateRegister } = require('../middleware/validation');
 
 const router = express.Router();
 
-// Public Routes (No authentication needed)
-router.post('/register', registerUser );
-router.post('/login', login);
+// Public Routes (No authentication needed) with validation
+router.post('/register', validateRegister, authenticateToken, authorizeAdmin, registerUser );
+router.post('/login', validateLogin, login);
 
 // New Validate Token Route
 router.get('/validateToken', validateToken);

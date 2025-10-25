@@ -21,12 +21,15 @@ const AlgorithmComparison = () => {
         setError(null);
         try {
             const data = await api.get('/assignments/algorithms/compare');
+            console.log('Comparison data received:', data); // Debug log
             if (data.success) {
+                console.log('Comparison structure:', data.comparison); // Debug log
                 setComparison(data.comparison);
             } else {
                 setError(data.message);
             }
         } catch (err) {
+            console.error('Error fetching comparison:', err); // Debug log
             setError('Failed to fetch comparison data');
         } finally {
             setLoading(false);
@@ -90,7 +93,7 @@ const AlgorithmComparison = () => {
                     <br /><br />
                     <strong>To generate comparison data:</strong>
                     <br />
-                    1. Run the Random algorithm (Distribute button)
+                    1. Run the Greedy algorithm (Distribute button)
                     <br />
                     2. Run the Genetic algorithm (Genetic Algorithm button)
                     <br />

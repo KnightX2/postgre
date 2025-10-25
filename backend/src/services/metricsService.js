@@ -4,6 +4,36 @@ const AssignmentQualityMetrics = require('../utils/assignmentQualityMetrics');
 
 class MetricsService {
     /**
+     * Standardize algorithm names consistently across the service
+     */
+    static getStandardizedName(name) {
+        switch (name.toLowerCase()) {
+            case 'random': return 'random';
+            case 'greedy': return 'greedy';
+            case 'genetic': return 'genetic';
+            case 'lp':
+            case 'linear_programming':
+            case 'linear_programming_lexicographic':
+            case 'linear programming':
+                return 'linear_programming';
+            default: return name.toLowerCase();
+        }
+    }
+
+    /**
+     * Get display name for an algorithm
+     */
+    static getDisplayName(name) {
+        switch (name) {
+            case 'random': return 'Random Algorithm';
+            case 'greedy': return 'Greedy Algorithm';
+            case 'genetic': return 'Genetic Algorithm';
+            case 'linear_programming': return 'Linear Programming';
+            default: return name.charAt(0).toUpperCase() + name.slice(1);
+        }
+    }
+
+    /**
      * Calculate and save metrics for any algorithm
      */
     static async saveMetrics(algorithmName, results, data, options = {}) {
@@ -23,11 +53,31 @@ class MetricsService {
             };
 
             // Calculate quality metrics
-            const assignments = results.successful.map(assignment => ({
-                examId: assignment.examId,
-                headId: assignment.headId,
-                secretaryId: assignment.secretaryId
-            }));
+            const assignments = results.successful.map(assignment => {
+                // Handle different result formats from different algorithms
+                if (assignment.headId && assignment.secretaryId) {
+                    // Linear Programming format
+                    return {
+                        examId: assignment.examId,
+                        headId: assignment.headId,
+                        secretaryId: assignment.secretaryId
+                    };
+                } else if (assignment.head && assignment.secretary) {
+                    // Genetic Algorithm format - need to find observer IDs by name
+                    const headObserver = data.observers.find(o => o.name === assignment.head);
+                    const secretaryObserver = data.observers.find(o => o.name === assignment.secretary);
+                    
+                    return {
+                        examId: assignment.examId,
+                        headId: headObserver?.observerid,
+                        secretaryId: secretaryObserver?.observerid
+                    };
+                } else {
+                    // Fallback - skip this assignment
+                    console.warn(`Unknown assignment format for exam ${assignment.examId}:`, assignment);
+                    return null;
+                }
+            }).filter(assignment => assignment !== null);
 
             metrics.qualityMetrics = AssignmentQualityMetrics.calculateMetrics(
                 assignments,
@@ -157,7 +207,7 @@ class MetricsService {
             switch (algo) {
                 case 'random': return 'assignment-performance-';
                 case 'genetic': return 'ga-assignment-performance-';
-                case 'lp': return 'lp-assignment-performance-';
+                case 'linear_programming': return 'lp-assignment-performance-';
                 default: return `${algo}-assignment-performance-`;
             }
         };
@@ -180,41 +230,20 @@ class MetricsService {
     /**
      * Compare metrics between algorithms
      */
-    static async compareMetrics(algorithms = ['random', 'genetic', 'linear_programming']) {
+    static async compareMetrics(algorithms = ['greedy', 'genetic', 'linear_programming']) {
         try {
             const comparison = {};
             let hasAnyMetrics = false;
 
-            // Standardize algorithm names
-            const getStandardizedName = (name) => {
-                switch (name.toLowerCase()) {
-                    case 'random': return 'random';
-                    case 'genetic': return 'genetic';
-                    case 'lp':
-                    case 'linear_programming':
-                    case 'linear_programming_lexicographic':
-                    case 'linear programming':
-                        return 'linear_programming';
-                    default: return name.toLowerCase();
-                }
-            };
-
-            const getDisplayName = (name) => {
-                switch (name) {
-                    case 'random': return 'Random Algorithm';
-                    case 'genetic': return 'Genetic Algorithm';
-                    case 'linear_programming': return 'Linear Programming';
-                    default: return name.charAt(0).toUpperCase() + name.slice(1);
-                }
-            };
+            // Using class-level standardization functions
 
             // Get latest metrics for each algorithm
             for (const algo of algorithms) {
-                const standardizedName = getStandardizedName(algo);
+                const standardizedName = this.getStandardizedName(algo);
                 const metrics = await this.getLatestMetrics(standardizedName);
                 if (metrics && metrics.qualityMetrics && metrics.qualityMetrics.overallScore) {
                     hasAnyMetrics = true;
-                    comparison[getDisplayName(standardizedName)] = {
+                    comparison[this.getDisplayName(standardizedName)] = {
                         overallScore: metrics.qualityMetrics.overallScore.percentage.toFixed(1) + '%',
                         coverage: metrics.qualityMetrics.coverage.percentage.toFixed(1) + '%',
                         workloadBalance: metrics.qualityMetrics.workloadBalance.score.toFixed(3),
@@ -323,7 +352,7 @@ class MetricsService {
                     }
                     
                     // Standardize algorithm name
-                    summary.algorithm = getStandardizedName(summary.algorithm);
+                    summary.algorithm = this.getStandardizedName(summary.algorithm);
                     summaries.push(summary);
                 } catch (parseError) {
                     console.error('Error parsing summary JSON:', parseError);

@@ -1,13 +1,19 @@
-const { client } = require('../../database/db.js');  // Assuming client is the same for both users and observers
+const { client } = require('../../database/db.js');
 
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-// Add this code near the top of controllers/userObserverController.js
-
 const multer = require('multer');
 const xlsx = require('xlsx');
 const crypto = require('crypto');
 const { parseTimeSlot, validateAndFormatTime } = require('../utils/timeSlotParser');
+const logger = require('../utils/logger');
+const { 
+    asyncHandler, 
+    createValidationError, 
+    createNotFoundError, 
+    createDatabaseError,
+    createBusinessError 
+} = require('../utils/errorHandler');
 // Translation service removed - using simple fallback logic
 
 const fileFilter = (req, file, cb) => {
@@ -548,7 +554,7 @@ const deleteUser = async (req, res) => {
     return res.status(400).json({ message: 'Invalid U_ID' });
   }
 
-  console.log('Deleting user with U_ID:', uId); // Debugging line
+      logger.info('User deletion initiated', { uId, userId: req.user?.userId });
 
   try {
     // Check if the user is an observer
@@ -562,7 +568,7 @@ const deleteUser = async (req, res) => {
     }
 
     const roleId = roleResult.rows[0].roleid;
-    console.log('User role ID:', roleId); // Debugging line
+    logger.debug('User role verification', { roleId, userId: req.user?.userId });
 
     if (roleId === 3) {
       // If the user is an observer
@@ -764,13 +770,15 @@ const bulkDeleteObservers = async (req, res) => {
 };
 
 const uploadObservers = async (req, res) => {
-    console.log('--- UPLOAD OBSERVERS START ---');
-    console.log('Request User:', req.user);
-    console.log('Request Headers:', req.headers);
-    console.log('Request Files:', req.files);
+    logger.info('Observer upload initiated', {
+        userId: req.user?.userId,
+        fileCount: req.files?.length || 0
+    });
 
     if (!req.files || req.files.length === 0) {
-        console.log('No files uploaded');
+        logger.warn('No files uploaded in observer upload request', {
+            userId: req.user?.userId
+        });
         return res.status(400).json({ message: "No Excel files uploaded." });
     }
 
@@ -795,7 +803,11 @@ const uploadObservers = async (req, res) => {
 
         // Process each file sequentially
         for (const [fileIndex, file] of req.files.entries()) {
-            console.log(`--- PROCESSING FILE ${fileIndex + 1}/${req.files.length}: ${file.originalname} ---`);
+            logger.info('Processing observer upload file', {
+            fileIndex: fileIndex + 1,
+            totalFiles: req.files.length,
+            userId: req.user?.userId
+        });
             
             const fileSummary = {
                 fileName: file.originalname,
@@ -816,9 +828,11 @@ const uploadObservers = async (req, res) => {
         
         const results = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-                console.log(`--- FILE ${fileIndex + 1} EXCEL DATA ---`);
-        console.log(JSON.stringify(results, null, 2));
-        console.log("-----------------------");
+                logger.debug('Excel file parsed successfully', {
+            fileIndex: fileIndex + 1,
+            rowCount: results.length,
+            userId: req.user?.userId
+        });
 
                 // Validate input before processing
                 if (results.length === 0) {
@@ -951,8 +965,11 @@ const uploadObservers = async (req, res) => {
             try {
                 await client.query('BEGIN');
                 
-                        console.log(`--- PROCESSING ROW ${rowNum} IN FILE ${fileIndex + 1} ---`);
-                console.log('Raw Row Data:', JSON.stringify(row, null, 2));
+                                    logger.debug('Processing observer row', {
+                rowNumber: rowNum,
+                fileIndex: fileIndex + 1,
+                userId: req.user?.userId
+            });
 
                 // Detailed mapping with extensive logging
                 const mappedRow = {};
@@ -965,7 +982,12 @@ const uploadObservers = async (req, res) => {
                     }
                 }
 
-                console.log('Mapped Row:', JSON.stringify(mappedRow, null, 2));
+                logger.debug('Observer data mapped successfully', {
+                rowNumber: rowNum,
+                hasName: !!mappedRow.name,
+                hasEmail: !!mappedRow.email,
+                userId: req.user?.userId
+            });
 
                 // Validate required fields
                 if (!mappedRow.name) {
@@ -987,10 +1009,13 @@ const uploadObservers = async (req, res) => {
                 
                 let mappedAvailability = availabilityMapping[mappedRow.availability?.trim()] || 'part-time';
 
-                console.log('Mapped Details:');
-                console.log('Title:', mappedTitle);
-                console.log('Scientific Rank:', mappedScientificRank);
-                console.log('Availability:', mappedAvailability);
+                            logger.debug('Observer details processed', {
+                rowNumber: rowNum,
+                hasTitle: !!mappedTitle,
+                hasScientificRank: !!mappedScientificRank,
+                availability: mappedAvailability,
+                userId: req.user?.userId
+            });
 
                 // Generate default password
                 const defaultPassword = crypto.randomBytes(8).toString('hex');
@@ -1074,7 +1099,7 @@ const uploadObservers = async (req, res) => {
                     if (matchingDayKey) {
                         const dayValue = row[matchingDayKey];
                         
-                        console.log('Time Slot Debug:', {
+                        logger.debug('Time slot processing', {
                             englishDay,
                             arabicDays,
                             matchingDayKey,
@@ -1095,7 +1120,10 @@ const uploadObservers = async (req, res) => {
                                 [newObserverId, capitalizedDay, '08:00', '16:30']
                             );
                             fileSummary.timeSlotsCreated++;
-                            console.log(`Inserted full day time slot for ${englishDay}`);
+                            logger.debug('Full day time slot created', {
+                            day: englishDay,
+                            userId: req.user?.userId
+                        });
                         } else if (typeof normalizedDayValue === 'string' && 
                                    (normalizedDayValue.includes('-') || 
                                     normalizedDayValue.includes('من الساعة'))) {
@@ -1136,13 +1164,22 @@ const uploadObservers = async (req, res) => {
 
                 await client.query('COMMIT');
                 fileSummary.observersCreated++;
-                console.log(`Successfully created observer: ${mappedRow.name}`);
+                logger.info('Observer created successfully', {
+                rowNumber: rowNum,
+                observerId: newObserverId,
+                userId: req.user?.userId
+            });
             } catch (rowError) {
                 // Rollback the transaction
                 await client.query('ROLLBACK');
                 
                 // Log the detailed error
-                console.error(`Error processing row ${rowNum} in file ${fileIndex + 1}:`, rowError);
+                logger.error('Error processing observer row', {
+                rowNumber: rowNum,
+                fileIndex: fileIndex + 1,
+                error: rowError.message,
+                userId: req.user?.userId
+            });
                 
                 // Add the error to the file summary
                 fileSummary.errors.push({ 
@@ -1177,14 +1214,16 @@ const uploadObservers = async (req, res) => {
                 overallSummary.errors.push(...fileSummary.errors);
                 overallSummary.parseErrors.push(...fileSummary.parseErrors);
 
-                console.log(`--- FILE ${fileIndex + 1} SUMMARY ---`);
-                console.log('File:', fileSummary.fileName);
-                console.log('Status:', fileSummary.status);
-                console.log('Observers Created:', fileSummary.observersCreated);
-                console.log('Observers Skipped:', fileSummary.observersSkipped);
-                console.log('Time Slots Created:', fileSummary.timeSlotsCreated);
-                console.log('Errors:', fileSummary.errors);
-                console.log('Parse Errors:', fileSummary.parseErrors);
+                        logger.info('File processing completed', {
+            fileIndex: fileIndex + 1,
+            status: fileSummary.status,
+            observersCreated: fileSummary.observersCreated,
+            observersSkipped: fileSummary.observersSkipped,
+            timeSlotsCreated: fileSummary.timeSlotsCreated,
+            errorCount: fileSummary.errors.length,
+            parseErrorCount: fileSummary.parseErrors.length,
+            userId: req.user?.userId
+        });
 
             } catch (fileError) {
                 console.error(`Fatal error processing file ${fileIndex + 1} (${file.originalname}):`, fileError);
@@ -1205,15 +1244,16 @@ const uploadObservers = async (req, res) => {
             overallSummary.fileResults.push(fileSummary);
         }
 
-        console.log('--- OVERALL UPLOAD SUMMARY ---');
-        console.log('Total Files:', overallSummary.totalFiles);
-        console.log('Files Processed:', overallSummary.filesProcessed);
-        console.log('Files Successful:', overallSummary.filesSuccessful);
-        console.log('Files Failed:', overallSummary.filesFailed);
-        console.log('Total Observers Created:', overallSummary.totalObserversCreated);
-        console.log('Total Observers Skipped:', overallSummary.totalObserversSkipped);
-        console.log('Total Time Slots Created:', overallSummary.totalTimeSlotsCreated);
-        console.log('File Results:', overallSummary.fileResults);
+            logger.info('Observer upload completed successfully', {
+        totalFiles: overallSummary.totalFiles,
+        filesProcessed: overallSummary.filesProcessed,
+        filesSuccessful: overallSummary.filesSuccessful,
+        filesFailed: overallSummary.filesFailed,
+        totalObserversCreated: overallSummary.totalObserversCreated,
+        totalObserversSkipped: overallSummary.totalObserversSkipped,
+        totalTimeSlotsCreated: overallSummary.totalTimeSlotsCreated,
+        userId: req.user?.userId
+    });
 
         // Determine response based on overall results
         const hasErrors = overallSummary.errors.length > 0 || overallSummary.parseErrors.length > 0;
@@ -1239,7 +1279,10 @@ const uploadObservers = async (req, res) => {
             });
         }
     } catch (err) {
-        console.error('Fatal error during bulk observer upload:', err);
+        logger.error('Fatal error during bulk observer upload', {
+        error: err.message,
+        userId: req.user?.userId
+    });
         
         // Return a detailed error response
         res.status(500).json({ 

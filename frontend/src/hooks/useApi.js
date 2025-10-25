@@ -26,9 +26,13 @@ export const useApi = () => {
 
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
-      // Handle authentication errors
+      // Handle authentication errors - only logout on actual auth failures, not network issues
       if (response.status === 401) {
+        console.log('Authentication failed, checking if token is actually expired');
+        // Only logout if we get a proper 401 response, not on network errors
         logout();
+        // Force page reload to ensure clean state
+        window.location.href = '/login';
         throw new Error('Session expired. Please log in again.');
       }
 

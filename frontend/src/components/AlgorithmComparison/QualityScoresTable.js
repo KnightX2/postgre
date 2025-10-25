@@ -1,8 +1,13 @@
 import React from 'react';
 
 const QualityScoresTable = ({ comparison, getScoreColor }) => {
+    // Safely access comparison data with fallbacks
+    const greedyData = comparison['Greedy Algorithm'] || comparison['greedy'] || {};
+    const geneticData = comparison['Genetic Algorithm'] || comparison['genetic'] || {};
+    const lpData = comparison['Linear Programming'] || comparison['linear_programming'] || {};
+    
     // Check if we have three algorithms or just two
-    const hasThreeAlgorithms = comparison['Linear Programming'];
+    const hasThreeAlgorithms = Object.keys(lpData).length > 0;
     
     return (
         <div className="comparison-section">
@@ -11,7 +16,7 @@ const QualityScoresTable = ({ comparison, getScoreColor }) => {
                 <thead>
                     <tr>
                         <th>Metric</th>
-                        <th>Random Algorithm</th>
+                        <th>Greedy Algorithm</th>
                         <th>Genetic Algorithm</th>
                         {hasThreeAlgorithms && <th>Linear Programming</th>}
                         <th>Winner</th>
@@ -26,58 +31,62 @@ const QualityScoresTable = ({ comparison, getScoreColor }) => {
                         <td>
                             <span 
                                 className="score-badge" 
-                                style={{ backgroundColor: getScoreColor(comparison['Random Algorithm'].overallScore) }}
+                                style={{ backgroundColor: getScoreColor(greedyData.overallScore || '0%') }}
                             >
-                                {comparison['Random Algorithm'].overallScore}
+                                {greedyData.overallScore || 'N/A'}
                             </span>
                         </td>
                         <td>
                             <span 
                                 className="score-badge" 
-                                style={{ backgroundColor: getScoreColor(comparison['Genetic Algorithm'].overallScore) }}
+                                style={{ backgroundColor: getScoreColor(geneticData.overallScore || '0%') }}
                             >
-                                {comparison['Genetic Algorithm'].overallScore}
+                                {geneticData.overallScore || 'N/A'}
                             </span>
                         </td>
                         {hasThreeAlgorithms && (
                             <td>
                                 <span 
                                     className="score-badge" 
-                                    style={{ backgroundColor: getScoreColor(comparison['Linear Programming'].overallScore) }}
+                                    style={{ backgroundColor: getScoreColor(lpData.overallScore || '0%') }}
                                 >
-                                    {comparison['Linear Programming'].overallScore}
+                                    {lpData.overallScore || 'N/A'}
                                 </span>
                             </td>
                         )}
                         <td>
                             <span className="winner-badge">
-                                {comparison.winner}
+                                {comparison.winner || 'N/A'}
                             </span>
                         </td>
                     </tr>
                     {['coverage', 'workloadBalance', 'fairness', 'efficiency'].map((metric) => {
-                        const randomValue = comparison['Random Algorithm'][metric];
-                        const geneticValue = comparison['Genetic Algorithm'][metric];
-                        const lpValue = hasThreeAlgorithms ? comparison['Linear Programming'][metric] : null;
+                        const greedyValue = greedyData[metric] || '0';
+                        const geneticValue = geneticData[metric] || '0';
+                        const lpValue = hasThreeAlgorithms ? (lpData[metric] || '0') : null;
                         
                         // Determine winner for this metric
-                        let winner = 'Random Algorithm';
-                        let bestValue = parseFloat(randomValue);
+                        let winner = 'Greedy Algorithm';
+                        let bestValue = parseFloat(greedyValue.replace('%', '')) || 0;
                         
-                        if (parseFloat(geneticValue) > bestValue) {
+                        const geneticValueNum = parseFloat(geneticValue.replace('%', '')) || 0;
+                        if (geneticValueNum > bestValue) {
                             winner = 'Genetic Algorithm';
-                            bestValue = parseFloat(geneticValue);
+                            bestValue = geneticValueNum;
                         }
                         
-                        if (hasThreeAlgorithms && parseFloat(lpValue) > bestValue) {
-                            winner = 'Linear Programming';
-                            bestValue = parseFloat(lpValue);
+                        if (hasThreeAlgorithms) {
+                            const lpValueNum = parseFloat(lpValue.replace('%', '')) || 0;
+                            if (lpValueNum > bestValue) {
+                                winner = 'Linear Programming';
+                                bestValue = lpValueNum;
+                            }
                         }
                         
                         return (
                             <tr key={metric}>
                                 <td>{metric.replace(/([A-Z])/g, ' $1').trim()}</td>
-                                <td>{randomValue}</td>
+                                <td>{greedyValue}</td>
                                 <td>{geneticValue}</td>
                                 {hasThreeAlgorithms && <td>{lpValue}</td>}
                                 <td>
@@ -96,15 +105,15 @@ const QualityScoresTable = ({ comparison, getScoreColor }) => {
                     <h3>Algorithm Improvements</h3>
                     <div className="improvements-grid">
                         <div className="improvement-card">
-                            <h4>Genetic vs Random</h4>
-                            <span className={parseFloat(comparison.improvements['Genetic vs Random']) > 0 ? 'positive' : 'negative'}>
-                                {comparison.improvements['Genetic vs Random']}
+                            <h4>Genetic vs Greedy</h4>
+                            <span className={parseFloat(comparison.improvements['Genetic vs Greedy']) > 0 ? 'positive' : 'negative'}>
+                                {comparison.improvements['Genetic vs Greedy']}
                             </span>
                         </div>
                         <div className="improvement-card">
-                            <h4>LP vs Random</h4>
-                            <span className={parseFloat(comparison.improvements['LP vs Random']) > 0 ? 'positive' : 'negative'}>
-                                {comparison.improvements['LP vs Random']}
+                            <h4>LP vs Greedy</h4>
+                            <span className={parseFloat(comparison.improvements['LP vs Greedy']) > 0 ? 'positive' : 'negative'}>
+                                {comparison.improvements['LP vs Greedy']}
                             </span>
                         </div>
                         <div className="improvement-card">

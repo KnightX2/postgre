@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaTimes, FaCheck, FaExclamationTriangle, FaClipboardList } from 'react-icons/fa';
+import { FaTimes, FaCheck, FaExclamationTriangle, FaClipboardList, FaSpinner } from 'react-icons/fa';
 import axios from 'axios';
 import DistributionOptionsModal from './Modals/DistributionOptionsModal';
 import './AssignmentsView.scss';
@@ -16,6 +16,8 @@ const AssignmentsView = () => {
     const [schedulesPerPage] = useState(10);
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
     const [pollingInterval, setPollingInterval] = useState(null);
+    const [algorithmLoading, setAlgorithmLoading] = useState(false);
+    const [loadingAlgorithm, setLoadingAlgorithm] = useState('');
     const hasInitialized = useRef(false);
 
     useEffect(() => {
@@ -78,13 +80,16 @@ const AssignmentsView = () => {
 
     const handleAlgorithmSelection = async (algorithmId, customParams = null) => {
         try {
+            setAlgorithmLoading(true);
+            setLoadingAlgorithm(algorithmId);
+            
             const token = localStorage.getItem('authToken');
             let endpoint = '';
             let requestBody = {};
             
             // Set the appropriate endpoint based on algorithm selection
-            if (algorithmId === 'random') {
-                endpoint = `http://localhost:3000/api/exams/distribute/random/${selectedSchedule.scheduleId}`;
+            if (algorithmId === 'greedy') {
+                endpoint = `http://localhost:3000/api/exams/distribute/greedy/${selectedSchedule.scheduleId}`;
             } else if (algorithmId === 'genetic') {
                 endpoint = `http://localhost:3000/api/assignments/schedules/${selectedSchedule.scheduleId}/assign-genetic`;
                 // Use custom parameters if provided, otherwise use defaults
@@ -254,7 +259,7 @@ const AssignmentsView = () => {
                     `${message}\n\n` +
                     `Winner: ${comparison.winner}\n` +
                     `Speed: ${comparison.performance.speedup}\n` +
-                    `Random Score: ${comparison['Random Algorithm'].overallScore}\n` +
+                    `Greedy Score: ${comparison['Greedy Algorithm'].overallScore}\n` +
                     `Genetic Score: ${comparison['Genetic Algorithm'].overallScore}\n\n` +
                     `Applied: ${appliedAlgorithm} Algorithm\n\n` +
                     `Would you like to view the detailed comparison?`
@@ -277,6 +282,9 @@ const AssignmentsView = () => {
                                  'Unknown error occurred';
             
             alert(`Distribution Failed: ${errorMessage}`);
+        } finally {
+            setAlgorithmLoading(false);
+            setLoadingAlgorithm('');
         }
         
         // Close the modal
@@ -429,7 +437,25 @@ const AssignmentsView = () => {
                     schedule={selectedSchedule}
                     onClose={() => setShowDistributionModal(false)}
                     onSelectAlgorithm={handleAlgorithmSelection}
+                    isLoading={algorithmLoading}
+                    loadingAlgorithm={loadingAlgorithm}
                 />
+            )}
+            
+            {/* Global screen overlay when algorithm is loading */}
+            {algorithmLoading && (
+                <div className="global-screen-overlay">
+                    <div className="global-loading-content">
+                        <div className="global-loading-spinner">
+                            <FaSpinner className="spinner" />
+                        </div>
+                        <h2>Algorithm Running</h2>
+                        <p>Please wait while the {loadingAlgorithm} algorithm processes your data...</p>
+                        <div className="global-progress-bar">
+                            <div className="global-progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

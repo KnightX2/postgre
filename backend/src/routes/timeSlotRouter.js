@@ -2,6 +2,7 @@
 const express = require('express');
 const { addTimeSlot, updateTimeSlot, deleteTimeSlot } = require('../controllers/timeslotController');
 const { authenticateToken } = require('../middleware/authMiddleware');
+const { validateTimeSlot, validateId } = require('../middleware/validation');
 
 const router = express.Router();
 
@@ -9,10 +10,10 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // Route to add a new time slot
-router.post('/', addTimeSlot);
+router.post('/', validateTimeSlot, addTimeSlot);
 
 // Route to update a time slot
-router.put('/:timeSlotID', updateTimeSlot);
+router.put('/:timeSlotID', validateTimeSlot, updateTimeSlot);
 
 // Route to delete a time slot
 router.delete('/:timeSlotID', deleteTimeSlot);

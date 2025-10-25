@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { FaUsers, FaUserCheck, FaCalendarAlt, FaClipboardList, FaSpinner } from 'react-icons/fa';
-import axios from 'axios';
+import { FaUsers, FaUserCheck, FaCalendarAlt, FaClipboardList, FaSpinner, FaSignOutAlt } from 'react-icons/fa';
+import { useApi } from '../hooks/useApi';
+import { useAuth } from '../contexts/AuthContext';
 import './Dashboard.scss';
 
 const Dashboard = () => {
@@ -13,6 +14,19 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const { get } = useApi();
+  const { user, isAuthenticated, isAdmin, logout, clearSession } = useAuth();
+
+  // Debug information
+  useEffect(() => {
+    console.log('Dashboard Debug Info:', {
+      user,
+      isAuthenticated,
+      isAdmin,
+      hasToken: !!localStorage.getItem('authToken'),
+      hasRole: !!localStorage.getItem('userRole')
+    });
+  }, [user, isAuthenticated, isAdmin]);
 
   useEffect(() => {
     if (!isInitialized) {
@@ -24,37 +38,24 @@ const Dashboard = () => {
   const fetchDashboardStats = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('authToken');
-      
-      if (!token) {
-        throw new Error('Not authorized');
-      }
 
       // Fetch users count
-      const usersResponse = await axios.get('http://localhost:3000/api/users', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const usersResponse = await get('/users');
 
       // Fetch observers count
-      const observersResponse = await axios.get('http://localhost:3000/api/users/observers', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const observersResponse = await get('/users/observers');
 
       // Fetch schedules count
-      const schedulesResponse = await axios.get('http://localhost:3000/api/exams/schedules/all', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const schedulesResponse = await get('/exams/schedules/all');
 
       // Fetch assignments count (schedule assignments)
-      const assignmentsResponse = await axios.get('http://localhost:3000/api/exams/schedule-assignments', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const assignmentsResponse = await get('/exams/schedule-assignments');
 
       setStats({
-        totalUsers: usersResponse.data.length || 0,
-        totalObservers: observersResponse.data.length || 0,
-        totalSchedules: schedulesResponse.data.schedules?.length || schedulesResponse.data.length || 0,
-        totalAssignments: assignmentsResponse.data.length || 0
+        totalUsers: usersResponse.length || 0,
+        totalObservers: observersResponse.length || 0,
+        totalSchedules: schedulesResponse.schedules?.length || schedulesResponse.length || 0,
+        totalAssignments: assignmentsResponse.length || 0
       });
 
       setError(null);
@@ -98,9 +99,35 @@ const Dashboard = () => {
         <div className="dashboard-content">
           <div className="error-container">
             <p className="error-message">{error}</p>
-            <button onClick={fetchDashboardStats} className="retry-button">
-              Try Again
-            </button>
+            <div className="debug-info" style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '12px' }}>
+              <strong>Debug Info:</strong><br/>
+              Authenticated: {isAuthenticated ? 'Yes' : 'No'}<br/>
+              Admin: {isAdmin ? 'Yes' : 'No'}<br/>
+              Has Token: {localStorage.getItem('authToken') ? 'Yes' : 'No'}<br/>
+              Has Role: {localStorage.getItem('userRole') ? 'Yes' : 'No'}<br/>
+              User: {user ? JSON.stringify(user) : 'None'}
+            </div>
+            <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+              <button onClick={fetchDashboardStats} className="retry-button">
+                Try Again
+              </button>
+              <button 
+                onClick={() => {
+                  clearSession();
+                  window.location.href = '/login';
+                }} 
+                style={{ 
+                  backgroundColor: '#dc3545', 
+                  color: 'white', 
+                  border: 'none', 
+                  padding: '8px 16px', 
+                  borderRadius: '4px', 
+                  cursor: 'pointer' 
+                }}
+              >
+                <FaSignOutAlt /> Clear Session & Go to Login
+              </button>
+            </div>
           </div>
         </div>
       </div>

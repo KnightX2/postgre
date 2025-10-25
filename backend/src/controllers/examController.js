@@ -4,7 +4,7 @@ const multer = require('multer'); // For file uploads
 const xlsx = require('xlsx'); // For parsing Excel files
 const storage = multer.memoryStorage(); // Store file in memory
 
-const AssignmentService = require('../services/assignmentService');
+const AssignmentService = require('../services/greedyAssignmentService');
 const { 
   parseTimeToMinutes, 
   getDayName, 
@@ -14,6 +14,14 @@ const {
   formatTimeForDisplay,
   formatDateForDisplay
 } = require('../utils/dateTimeUtils');
+const logger = require('../utils/logger');
+const { 
+    asyncHandler, 
+    createValidationError, 
+    createNotFoundError, 
+    createDatabaseError,
+    createBusinessError 
+} = require('../utils/errorHandler');
 
 // File filter for multer
 const fileFilter = (req, file, cb) => {
@@ -445,7 +453,7 @@ const deleteExam = async (req, res) => {
         const examId = parseInt(req.params.examId); // Convert to number
         
         if (!examId || isNaN(examId)) {
-            console.log('Invalid exam ID:', req.params.examId);
+            logger.warn('Invalid exam ID provided', { providedId: req.params.examId });
             return res.status(400).json({
                 message: "Invalid exam ID provided"
             });
@@ -758,12 +766,11 @@ function hasTimeConflict(existingExam, newExam) {
 }
 
 function findAvailableObserver(exam, observerPool, mustBeDr) {
-    console.log(`🔍 [OBSERVER SELECTION] Finding observer for exam:
-        Date: ${exam.examdate}
-        Time: ${exam.starttime} - ${exam.endtime}
-        Is Head Observer: ${mustBeDr}
-        Total Observers: ${observerPool.length}
-    `);
+    logger.debug('Finding available observer', {
+        examId: exam.examid,
+        mustBeDr,
+        observerPoolSize: observerPool.length
+    });
 
     // Filter observers based on Dr. requirement and availability
     const availableObservers = observerPool.filter(observer => {
@@ -775,48 +782,67 @@ function findAvailableObserver(exam, observerPool, mustBeDr) {
             hasTimeConflict(assignedExam, exam)
         ) || false;
 
-        console.log(`🔍 [OBSERVER SELECTION] Checking observer: ${observer.name} (${observer.title})
-            Meets Dr Requirement: ${meetsDrRequirement}
-            Has Conflict: ${hasConflict}
-        `);
+        logger.debug('Observer availability check', {
+            observerId: observer.observerid,
+            meetsDrRequirement,
+            hasConflict
+        });
 
         return meetsDrRequirement && !hasConflict;
     });
 
-    console.log(`🔍 [OBSERVER SELECTION] Available Observers: ${availableObservers.map(o => o.name).join(', ')}`);
+    logger.debug('Observer selection completed', {
+        availableObserversCount: availableObservers.length,
+        selectionMade: availableObservers.length > 0
+    });
 
     // Return first available observer
     return availableObservers.length > 0 ? availableObservers[0] : null;
 }
 
-// Random distribution algorithm - now using optimized AssignmentService
-const randomDistribution = async (req, res) => {
-    try {
-        const { scheduleId } = req.params;
+// Greedy distribution algorithm - using optimized AssignmentService
+const greedyDistribution = asyncHandler(async (req, res) => {
+    const { scheduleId } = req.params;
 
-        // Validate input
-        if (!scheduleId) {
-            return res.status(400).json({ message: 'Schedule ID is required' });
-        }
+    // Validate input
+    if (!scheduleId || isNaN(parseInt(scheduleId))) {
+        throw createValidationError('Valid schedule ID is required', 'scheduleId');
+    }
 
-        // Get all exam IDs for this schedule
-        const examsResult = await client.query(
-            `SELECT ExamID FROM ExamSchedule WHERE ScheduleID = $1`,
-            [scheduleId]
-        );
+    // Get all exam IDs for this schedule
+    const examsResult = await client.query(
+        `SELECT ExamID FROM ExamSchedule WHERE ScheduleID = $1`,
+        [scheduleId]
+    );
 
-        if (examsResult.rows.length === 0) {
-            return res.status(404).json({ message: 'No exams found for this schedule' });
-        }
+    if (examsResult.rows.length === 0) {
+        throw createNotFoundError('No exams found for this schedule');
+    }
 
-        const examIds = examsResult.rows.map(row => row.examid);
+    const examIds = examsResult.rows.map(row => row.examid);
 
-        // Use the optimized assignment service for bulk assignment
-        const result = await AssignmentService.assignObserversToExam(examIds);
+    logger.info('Starting greedy observer assignment distribution', {
+        scheduleId,
+        examCount: examIds.length,
+        userId: req.user?.userId
+    });
 
-        // Format response to match expected format
-        const response = {
-            message: result.message || "Distribution complete",
+    // Use the greedy assignment service for bulk assignment
+    const result = await AssignmentService.assignObserversWithGreedy(examIds);
+
+    logger.info('Greedy observer assignment distribution completed', {
+        scheduleId,
+        totalExams: result.results ? result.results.successful.length + result.results.failed.length : 0,
+        assignedExams: result.results ? result.results.successful.length : 0,
+        failedExams: result.results ? result.results.failed.length : 0,
+        userId: req.user?.userId
+    });
+
+    // Format response to match expected format
+    const response = {
+        success: true,
+        message: result.message || "Greedy distribution completed successfully",
+        data: {
             scheduleId: scheduleId,
             totalExams: result.results ? result.results.successful.length + result.results.failed.length : 0,
             assignedExams: result.results ? result.results.successful.length : 0,
@@ -827,17 +853,11 @@ const randomDistribution = async (req, res) => {
             })) : [],
             failed: result.results ? result.results.failed : [],
             performance: result.performance
-        };
+        }
+    };
 
-        res.json(response);
-    } catch (error) {
-        console.error('Error in randomDistribution:', error);
-        res.status(500).json({
-            message: "Failed to distribute observers",
-            error: error.message
-        });
-    }
-};
+    res.json(response);
+});
 
 const getScheduleDetails = async (req, res) => {
     try {
@@ -1120,7 +1140,7 @@ const updateSchedule = async (req, res) => {
 
 const getAllExamsWithAssignments = async (req, res) => {
     try {
-        console.log('User role:', req.user.role); // Log the user's role for debugging
+        logger.debug('User authentication verified', { userId: req.user?.userId }); // Log safely without role details
 
         const query = `
             SELECT 
@@ -1141,11 +1161,17 @@ const getAllExamsWithAssignments = async (req, res) => {
             LEFT JOIN Observer o2 ON es.ExamSecretary = o2.ObserverID
         `;
 
-        console.log('Executing query:', query);
+        logger.debug('Fetching exams from database', {
+            userId: req.user?.userId,
+            queryType: 'exam_list'
+        });
 
         const result = await client.query(query);
         
-        console.log('Query result:', result.rows);
+        logger.info('Exams fetched successfully', {
+            examCount: result.rows.length,
+            userId: req.user?.userId
+        });
 
         // Format dates for frontend display
         const formattedRows = result.rows.map(row => ({
@@ -1155,16 +1181,14 @@ const getAllExamsWithAssignments = async (req, res) => {
 
         res.json(formattedRows);
     } catch (error) {
-        console.error('FULL Error details:', error);
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        logger.error('Failed to fetch exams', {
+            error: error.message,
+            userId: req.user?.userId
+        });
         
         res.status(500).json({ 
-            message: 'Error fetching exams', 
-            errorName: error.name,
-            errorMessage: error.message,
-            errorStack: error.stack 
+            success: false,
+            message: 'Failed to fetch exams'
         });
     }
 };
@@ -1429,6 +1453,6 @@ module.exports = {
     updateSchedule,
     getAllExamsWithAssignments,
     getScheduleAssignments,
-    randomDistribution,
+    greedyDistribution,
     checkTimeslotCompliance
 };

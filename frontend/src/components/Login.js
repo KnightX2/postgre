@@ -64,14 +64,14 @@ const Login = () => {
 
             // Map roleId to role string for the context
             let role = 'normal_user';
-            if (response.roleId === 2) {
+            if (response.data.roleId === 2) {
                 role = 'admin';
-            } else if (response.roleId === 3) {
+            } else if (response.data.roleId === 3) {
                 role = 'observer';
             }
 
             // Call context login with the mapped role and token
-            login(role, response.token);
+            login(role, response.data.token);
             navigate('/dashboard');
         } catch (err) {
             setError(err.message || 'Login failed. Please try again.');

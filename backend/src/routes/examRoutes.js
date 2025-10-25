@@ -18,7 +18,7 @@ router.delete('/:examId', authenticateToken, examController.deleteExam);
 router.delete('/schedules/:scheduleId', authenticateToken, examController.deleteSchedule);
 router.get('/all', authenticateToken, examController.getAllExamsWithAssignments);
 router.get('/schedule-assignments', authenticateToken, examController.getScheduleAssignments);
-router.post('/distribute/random/:scheduleId', authenticateToken, examController.randomDistribution);
+router.post('/distribute/greedy/:scheduleId', authenticateToken, examController.greedyDistribution);
 router.get('/schedules/:scheduleId/check-timeslots', authenticateToken, examController.checkTimeslotCompliance);
 
 module.exports = router;
